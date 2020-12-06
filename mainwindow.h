@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <complex>
+#include <condition_variable>
 #include <queue>
 #include <thread>
 #include <mutex>
@@ -9,6 +10,7 @@
 
 #include <QMainWindow>
 #include <QPainter>
+#include <QTimer>
 
 QT_BEGIN_NAMESPACE
 namespace Ui
@@ -51,8 +53,20 @@ private:
 
 	struct Threading
 	{
-		std::list<Tile*> tasks;
+		struct TileWithPrior
+		{
+			int prior;
+			Tile* tile;
+
+			int operator<=>(TileWithPrior const& r) const
+			{
+				return prior - r.prior;
+			}
+		};
+
+		std::priority_queue<TileWithPrior> tasks;
 		std::mutex mut;
+		std::condition_variable cv;
 
 		Threading(Threading&&) = delete;
 		Threading(Threading const&) = delete;
@@ -61,8 +75,9 @@ private:
 		{
 			std::atomic_bool running = true;
 			Threading* thr = nullptr;
+
+			void ThreadFunc();
 		};
-		static void ThreadFunc(ThreadData* data);
 		std::vector<std::pair<std::thread, ThreadData>> threads;
 
 		Threading(std::size_t size)

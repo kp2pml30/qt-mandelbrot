@@ -20,7 +20,7 @@ MainWindow::MainWindow(QWidget* parent)
 	for (auto& a : threading.threads)
 	{
 		a.second.thr = &threading;
-		a.first = std::thread(Threading::ThreadFunc, &a.second);
+		a.first = std::thread(&Threading::ThreadData::ThreadFunc, &a.second);
 	}
 
 	Schedule();
@@ -32,13 +32,12 @@ public:
 	static constexpr int size = 256;
 
 	std::atomic<QImage*> rendered;
-	float lastAccesed;
+	std::atomic_bool running = false;
 private:
 	QImage* dflt;
-	std::array<QImage, 3> mips;
+	std::array<QImage, 4> mips;
 	int currentMip = 0;
 	int currentY = 0;
-	bool running = false;
 	Complex corner, diag;
 	bool interrupt = false;
 	std::mutex mut;
@@ -51,7 +50,7 @@ private:
 		constexpr int MSTEPS = 255;
 		for (int i = 0; i < MSTEPS; i++)
 			if (std::abs(z) >= 2)
-				return i;
+				return i % 64;
 			else
 				z = z * z + c;
 		return 0;
@@ -60,9 +59,10 @@ public:
 	Tile(QImage* dflt) : dflt(dflt), rendered(dflt)
 	{
 		assert(dflt != nullptr);
-		mips[0] = QImage(size / 8, size / 8, QImage::Format::Format_RGB888);
-		mips[1] = QImage(size / 2, size / 2, QImage::Format::Format_RGB888);
-		mips[2] = QImage(size, size, QImage::Format::Format_RGB888);
+		mips[0] = QImage(size / 32, size / 32, QImage::Format::Format_RGB888);
+		mips[1] = QImage(size /  8, size /  8, QImage::Format::Format_RGB888);
+		mips[2] = QImage(size /  2, size /  2, QImage::Format::Format_RGB888);
+		mips[3] = QImage(size, size, QImage::Format::Format_RGB888);
 	}
 	Tile(Tile const&) = delete;
 	Tile(Tile&&) = delete;
@@ -75,6 +75,14 @@ public:
 		interrupt = true;
 	}
 
+	// thread safe
+	int GetPrior(QImage const* img) const noexcept
+	{
+		if (img == dflt)
+			return 25;
+		return mips.size() - (img - &mips.front());
+	}
+	// thread safe
 	bool IsLast(QImage const* img) const noexcept
 	{
 		return img == &mips.back();
@@ -93,32 +101,21 @@ public:
 		rendered.store(dflt);
 	}
 	// to call from drawer
-	void Update() noexcept
+	bool Update() noexcept
 	{
 		int yd = 0;
-		std::unique_ptr<Tile, std::function<void(Tile*)>> runningResetter;
+		std::unique_ptr<Tile, std::function<void(Tile*)>> runningResetter = {this, [](Tile* a) { a->running.store(false); }};
 		while (true)
 		{
 			int y;
 			{
 				auto lk = std::lock_guard(mut);
-				if (yd == 0)
-				{
-					if (running)
-						return;
-					running = true;
-					runningResetter = {this, [](Tile* a) {
-							// resetter is declared before lk so would work
-							auto lk = std::lock_guard(a->mut);
-							a->running = false;
-						}};
-				}
 				if (currentMip == mips.size())
-					return;
+					return false;
 				if (interrupt)
 				{
 					interrupt = false;
-					return;
+					return false;
 				}
 				// may fire only during first iteration
 				currentY += yd;
@@ -127,9 +124,8 @@ public:
 					rendered.store(&mips[currentMip]);
 					currentY = 0;
 					currentMip++;
+					return currentMip != mips.size();
 				}
-				if (currentMip == mips.size())
-					return;
 				y = currentY;
 			}
 
@@ -146,28 +142,45 @@ public:
 			{
 				auto xx = (PrecType)x / w * diag.real() + corner.real();
 				auto val = mand({xx, yy});
-				data[x * 3 + 0] = val;
-				data[x * 3 + 1] = val;
-				data[x * 3 + 2] = val;
+				data[x * 3 + 0] = val * 4;
+				data[x * 3 + 1] = val / 2;
+				data[x * 3 + 2] = val % 3 * 127;
 			}
 		}
 	}
 };
 
-void MainWindow::Threading::ThreadFunc(ThreadData* data)
+void MainWindow::Threading::ThreadData::ThreadFunc()
 {
-	while (data->running.load())
+	// alias
+	auto& queue = thr->tasks;
+	bool put = false;
+	int prior;
+	Tile* tile;
+	while (running.load())
 	{
-		Tile* tile = nullptr;
 		{
-			auto lck = std::lock_guard(data->thr->mut);
-			auto& queue = data->thr->tasks;
-			if (queue.empty())
-				continue;
-			tile = std::move(queue.front());
-			queue.pop_front();
+			auto lck = std::unique_lock(thr->mut);
+			if (put)
+			{
+				tile->running.store(true);
+				queue.push({prior - 1, tile});
+				put = false;
+			}
+			else
+			{
+				thr->cv.wait(lck, [&]() {
+						return !(queue.empty() && running.load());
+					});
+			}
+			if (!running.load())
+				break;
+
+			prior = queue.top().prior;
+			tile = queue.top().tile;
+			queue.pop();
 		}
-		tile->Update();
+		put = tile->Update();
 	}
 }
 
@@ -260,20 +273,25 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 			};
 			corner += zeroPixelCoord;
 			auto* tile = tilesData.GetTile(rx, ry, corner, {Tile::size * scale, Tile::size * scale});
+			auto img = tile->rendered.load();
 			{
-				tile->mut.lock();
-				auto running = tile->running;
-				tile->mut.unlock();
-				if (!running)
+				if (!tile->running.load())
 				{
-					auto guard = std::lock_guard(threading.mut);
-					threading.tasks.emplace_back(tile);
+					auto prior = tile->GetPrior(img);
+					tile->running.store(true);
+					{
+						auto guard = std::lock_guard(threading.mut);
+						threading.tasks.push({prior, tile});
+					}
+					// bad, because we may render low priority task
+					// threading.cv.notify_one();
 				}
 			}
-			auto img = tile->rendered.load();
 			needsRerender |= !tile->IsLast(img);
 			int ratio = Tile::size / img->width();
-			// painter.setViewport(xcamoffset + x, ycamoffset + y, width * ratio, height * ratio);
+#if 0
+			painter.setViewport(xcamoffset + x, ycamoffset + y, width * ratio, height * ratio);
+#else
 			painter.setTransform(
 					QTransform(
 						ratio, 0,
@@ -282,12 +300,16 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 						xcamoffset + x,
 						ycamoffset + y
 				));
+#endif
 			painter.drawImage(0, 0, *tile->rendered.load());
 			auto txt = std::to_string(rx);
 			// painter.drawText(0, 0, txt.c_str());
-			if (needsRerender)
-				Schedule();
-		}
+		} // x cycle
+	} // y cycle
+	if (needsRerender)
+	{
+		threading.cv.notify_all();
+		Schedule();
 	}
 }
 
@@ -340,8 +362,10 @@ void MainWindow::mouseMoveEvent(QMouseEvent* e)
 
 MainWindow::~MainWindow()
 {
+	tilesData.InvalidateTiles();
 	for (auto& a : threading.threads)
 		a.second.running.store(false);
+	threading.cv.notify_all();
 	for (auto& a : threading.threads)
 		a.first.join();
 }
