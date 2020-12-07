@@ -37,7 +37,7 @@ private:
 
 		constexpr int MSTEPS = 255;
 		for (int i = 0; i < MSTEPS; i++)
-			if (std::abs(z) >= 2)
+			if (std::norm(z) >= std::norm(Complex(2, 0))) // fast math removes sqrt, but anyway
 				return i % 64;
 			else
 				z = z * z + c;
@@ -47,7 +47,7 @@ public:
 	Tile(QImage* dflt) : dflt(dflt), rendered(dflt)
 	{
 		assert(dflt != nullptr);
-		mips[0] = QImage(size / 32, size / 32, QImage::Format::Format_RGB888);
+		mips[0] = QImage(size / 16, size / 16, QImage::Format::Format_RGB888);
 		mips[1] = QImage(size /  8, size /  8, QImage::Format::Format_RGB888);
 		mips[2] = QImage(size /  2, size /  2, QImage::Format::Format_RGB888);
 		mips[3] = QImage(size, size, QImage::Format::Format_RGB888);
@@ -78,6 +78,11 @@ public:
 	bool IsLast(QImage const* img) const noexcept
 	{
 		return img == &mips.back();
+	}
+	// thread safe
+	bool IsDflt(QImage const* img) const noexcept
+	{
+		return img == dflt;
 	}
 
 	// to call from main thread

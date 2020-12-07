@@ -28,7 +28,6 @@ public:
 	MainWindow(QWidget* parent = nullptr);
 	~MainWindow();
 
-	void resizeEvent(QResizeEvent*) override;
 	void paintEvent(QPaintEvent*) override;
 	void mouseMoveEvent(QMouseEvent*) override;
 	void wheelEvent(QWheelEvent*) override;
@@ -96,6 +95,7 @@ private:
 		std::vector<Tile*> pool;
 		using PixCoord = std::pair<int, int>;
 		std::map<PixCoord, Tile*> cache;
+		Tile* inCaseOfBlack = nullptr;
 
 		// from main thread only
 		TileHelper();

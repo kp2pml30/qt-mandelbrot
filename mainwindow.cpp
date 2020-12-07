@@ -75,6 +75,7 @@ MainWindow::TileHelper::~TileHelper()
 }
 void MainWindow::TileHelper::InvalidateTiles() noexcept
 {
+	inCaseOfBlack = nullptr;
 	for (auto& a : cache)
 	{
 		a.second->Interrupt();
@@ -109,15 +110,11 @@ MainWindow::Tile* MainWindow::TileHelper::GetFromPool() noexcept
 	return Allocate();
 }
 
-void MainWindow::resizeEvent(QResizeEvent* ev)
-{
-	QMainWindow::resizeEvent(ev);
-	// tilesData.InvalidateTiles();
-}
 void MainWindow::paintEvent(QPaintEvent* ev)
 {
 	QMainWindow::paintEvent(ev);
 	bool needsRerender = false;
+	bool totallyBad = true;
 
 	int width = this->width();
 	int height = this->height();
@@ -154,8 +151,9 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 			if (needsInvalidation)
 				usedTiles.used.emplace(tile);
 			auto img = tile->rendered.load();
-			bool isLast = tile->IsLast(img);
-			if (!isLast)
+			if (!tile->IsDflt(img))
+				totallyBad = false;
+			if (!tile->IsLast(img))
 			{
 				needsRerender = true;
 				if (!tile->running.load())
@@ -175,9 +173,6 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 				}
 			}
 			int ratio = Tile::size / img->width();
-#if 0
-			painter.setViewport(xcamoffset + x, ycamoffset + y, width * ratio, height * ratio);
-#else
 			painter.setTransform(
 					QTransform(
 						ratio, 0,
@@ -186,15 +181,37 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 						xcamoffset + x,
 						ycamoffset + y
 				));
-#endif
 			painter.drawImage(0, 0, *tile->rendered.load());
-			auto txt = std::to_string(rx);
-			// painter.drawText(0, 0, txt.c_str());
 		} // x cycle
 	} // y cycle
 	if (needsInvalidation)
 		printf("invalidating cache: %lu removed\n", usedTiles.InvalidateCache(tilesData));
 	usedTiles.Finish();
+	// render at least something to show
+	if (totallyBad)
+	{
+		int wh = std::max(width, height);
+		if (tilesData.inCaseOfBlack == nullptr)
+		{
+			constexpr auto intm = std::numeric_limits<int>::max();
+			auto offset = Complex(Tile::size, Tile::size) * coordSys.scale;
+			tilesData.inCaseOfBlack = tilesData.GetTile(intm, intm, coordSys.zeroPixelCoord - offset, Complex(wh, wh) * coordSys.scale);
+			// for interrupt here :)
+			tilesData.inCaseOfBlack->Update();
+			tilesData.inCaseOfBlack->Update();
+		}
+		auto& img = *tilesData.inCaseOfBlack->rendered.load();
+		auto ratio = (PrecType)wh / img.width();
+		painter.setTransform(
+				QTransform(
+					ratio, 0,
+					0,     ratio,
+
+					0,
+					0
+			));
+		painter.drawImage(0, 0, img);
+	}
 	if (needsRerender)
 	{
 		threading.cv.notify_all();
