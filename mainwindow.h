@@ -7,6 +7,7 @@
 #include <thread>
 #include <mutex>
 #include <functional>
+#include <unordered_set>
 
 #include <QMainWindow>
 #include <QPainter>
@@ -35,14 +36,10 @@ public:
 	using PrecType = double;
 	// this complex would be used as vec2 as well
 	using Complex = std::complex<PrecType>;
-
 private:
 	std::unique_ptr<Ui::MainWindow> ui;
 
-	int xcoord = 0, ycoord = 0;
-
-	struct
-	{
+	struct {
 		int lastX = 0;
 		int lastY = 0;
 		std::chrono::time_point<std::chrono::system_clock> lastUpd = std::chrono::system_clock::now();
@@ -86,8 +83,23 @@ private:
 	} threading;
 	friend Threading;
 
-	Complex zeroPixelCoord = {-2, -2};
-	PrecType scale = 1 / 256.0;
+	struct {
+		Complex zeroPixelCoord = {-2, -2};
+		PrecType scale = 1 / 256.0;
+		int
+			xcoord = 0,
+			ycoord = 0;
+	} coordSys;
+
+	struct UsedTiles
+	{
+		std::unordered_set<Tile*>
+			prev,
+			cur;
+
+		void Add(Tile*) noexcept;
+		void Finish() noexcept;
+	} usedTiles;
 
 	struct TileHelper
 	{

@@ -1,11 +1,15 @@
 #include <chrono>
 #include <mutex>
 
-#include "mainwindow.h"
+#include "tile.h"
 #include "./ui_mainwindow.h"
 
 #include <QMouseEvent>
 #include <QTimer>
+
+#ifndef __FAST_MATH__
+#warning fast math is not enabled
+#endif
 
 using PrecType = MainWindow::PrecType;
 using Complex = MainWindow::Complex;
@@ -26,146 +30,21 @@ MainWindow::MainWindow(QWidget* parent)
 	Schedule();
 }
 
-struct MainWindow::Tile
-{
-public:
-	static constexpr int size = 256;
-
-	std::atomic<QImage*> rendered;
-	std::atomic_bool running = false;
-private:
-	QImage* dflt;
-	std::array<QImage, 4> mips;
-	int currentMip = 0;
-	int currentY = 0;
-	Complex corner, diag;
-	bool interrupt = false;
-	std::mutex mut;
-	friend MainWindow;
-
-	static std::uint8_t mand(Complex c) noexcept
-	{
-		Complex z = {0, 0};
-
-		constexpr int MSTEPS = 255;
-		for (int i = 0; i < MSTEPS; i++)
-			if (std::abs(z) >= 2)
-				return i % 64;
-			else
-				z = z * z + c;
-		return 0;
-	}
-public:
-	Tile(QImage* dflt) : dflt(dflt), rendered(dflt)
-	{
-		assert(dflt != nullptr);
-		mips[0] = QImage(size / 32, size / 32, QImage::Format::Format_RGB888);
-		mips[1] = QImage(size /  8, size /  8, QImage::Format::Format_RGB888);
-		mips[2] = QImage(size /  2, size /  2, QImage::Format::Format_RGB888);
-		mips[3] = QImage(size, size, QImage::Format::Format_RGB888);
-	}
-	Tile(Tile const&) = delete;
-	Tile(Tile&&) = delete;
-	void operator=(Tile const&) = delete;
-	void operator=(Tile&&) = delete;
-
-	void Interrupt()
-	{
-		auto locker = std::lock_guard(mut);
-		interrupt = true;
-	}
-
-	// thread safe
-	int GetPrior(QImage const* img) const noexcept
-	{
-		if (img == dflt)
-			return 25;
-		return mips.size() - (img - &mips.front());
-	}
-	// thread safe
-	bool IsLast(QImage const* img) const noexcept
-	{
-		return img == &mips.back();
-	}
-
-	// to call from main thread
-	void Set(Complex corner, Complex diag) noexcept
-	{
-		auto locker = std::lock_guard(mut);
-		interrupt = true;
-		this->corner = corner;
-		this->diag = diag;
-		currentMip = 0;
-		currentY = 0;
-
-		rendered.store(dflt);
-	}
-	// to call from drawer
-	bool Update() noexcept
-	{
-		int yd = 0;
-		std::unique_ptr<Tile, std::function<void(Tile*)>> runningResetter = {this, [](Tile* a) { a->running.store(false); }};
-		while (true)
-		{
-			int y;
-			{
-				auto lk = std::lock_guard(mut);
-				if (currentMip == mips.size())
-					return false;
-				if (interrupt)
-				{
-					interrupt = false;
-					return false;
-				}
-				// may fire only during first iteration
-				currentY += yd;
-				if (currentY == mips[currentMip].height())
-				{
-					rendered.store(&mips[currentMip]);
-					currentY = 0;
-					currentMip++;
-					return currentMip != mips.size();
-				}
-				y = currentY;
-			}
-
-			yd = 1;
-
-			auto& img = mips[currentMip];
-			int
-				h = img.height(),
-				w = img.width();
-
-			std::uint8_t* data = img.bits() + y * img.bytesPerLine();
-			auto yy = (PrecType)y / h * diag.imag() + corner.imag();
-			for (int x = 0; x < w; x++)
-			{
-				auto xx = (PrecType)x / w * diag.real() + corner.real();
-				auto val = mand({xx, yy});
-				data[x * 3 + 0] = val * 4;
-				data[x * 3 + 1] = val / 2;
-				data[x * 3 + 2] = val % 3 * 127;
-			}
-		}
-	}
-};
-
 void MainWindow::Threading::ThreadData::ThreadFunc()
 {
 	// alias
 	auto& queue = thr->tasks;
-	bool put = false;
+	Tile::UpdateStatus put = Tile::DONE;
 	int prior;
 	Tile* tile;
 	while (running.load())
 	{
 		{
 			auto lck = std::unique_lock(thr->mut);
-			if (put)
+			if (put == Tile::UPDATED || put == Tile::INTERRUPT_AND_PUT)
 			{
 				tile->running.store(true);
 				queue.push({prior - 1, tile});
-				put = false;
 			}
 			else
 			{
@@ -244,15 +123,16 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 	int height = this->height();
 
 	QPainter painter(this);
-	int xcamoffset = xcoord % Tile::size;
-	int ycamoffset = ycoord % Tile::size;
+	int xcamoffset = coordSys.xcoord % Tile::size;
+	int ycamoffset = coordSys.ycoord % Tile::size;
 	if (xcamoffset <= 0)
 		xcamoffset += Tile::size;
 	if (ycamoffset <= 0)
 		ycamoffset += Tile::size;
+	Threading::TileWithPrior prevTile = {100, nullptr};
 	for (int y = -Tile::size; y <= height; y += Tile::size)
 	{
-		int ry = y - ycoord;
+		int ry = y - coordSys.ycoord;
 		if (ry >= 0)
 			ry = ry / Tile::size;
 		else
@@ -260,34 +140,37 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 		ry *= Tile::size;
 		for (int x = -Tile::size; x <= width; x += Tile::size)
 		{
-			int rx = x - xcoord;
+			int rx = x - coordSys.xcoord;
 			if (rx >= 0)
 				rx = rx / Tile::size;
 			else
 				rx = (rx - Tile::size + 1) / Tile::size;
 			rx *= Tile::size;
 
-			Complex corner = {
-				rx * scale,
-				ry * scale
-			};
-			corner += zeroPixelCoord;
-			auto* tile = tilesData.GetTile(rx, ry, corner, {Tile::size * scale, Tile::size * scale});
+			Complex corner = Complex(rx, ry) * coordSys.scale;
+			corner += coordSys.zeroPixelCoord;
+			auto* tile = tilesData.GetTile(rx, ry, corner, Complex(Tile::size, Tile::size) * coordSys.scale);
 			auto img = tile->rendered.load();
+			bool isLast = tile->IsLast(img);
+			if (!isLast)
 			{
+				needsRerender = true;
 				if (!tile->running.load())
 				{
+					usedTiles.Add(tile);
 					auto prior = tile->GetPrior(img);
+					Threading::TileWithPrior putMe = {prior, tile};
 					tile->running.store(true);
 					{
 						auto guard = std::lock_guard(threading.mut);
-						threading.tasks.push({prior, tile});
+						threading.tasks.push(putMe);
 					}
-					// bad, because we may render low priority task
-					// threading.cv.notify_one();
+					if (prevTile < putMe)
+						prevTile.tile->Interrupt(Tile::INTERRUPT_AND_PUT);
+					prevTile = putMe;
+					threading.cv.notify_one();
 				}
 			}
-			needsRerender |= !tile->IsLast(img);
 			int ratio = Tile::size / img->width();
 #if 0
 			painter.setViewport(xcamoffset + x, ycamoffset + y, width * ratio, height * ratio);
@@ -306,6 +189,7 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 			// painter.drawText(0, 0, txt.c_str());
 		} // x cycle
 	} // y cycle
+	usedTiles.Finish();
 	if (needsRerender)
 	{
 		threading.cv.notify_all();
@@ -324,13 +208,13 @@ void MainWindow::wheelEvent(QWheelEvent* ev)
 	auto d = ev->angleDelta().ry();
 	if (d == 0)
 		return;
-	zeroPixelCoord -= scale * Complex(xcoord, ycoord);
-	xcoord = ycoord = 0;
+	coordSys.zeroPixelCoord -= coordSys.scale * Complex(coordSys.xcoord, coordSys.ycoord);
+	coordSys.xcoord = coordSys.ycoord = 0;
 	PrecType dd = d / 500.0;
 	if (d > 0)
-		scale *= 1.1;
+		coordSys.scale *= 1.1;
 	else
-		scale /= 1.1;
+		coordSys.scale /= 1.1;
 	tilesData.InvalidateTiles();
 	this->update();
 }
@@ -354,8 +238,8 @@ void MainWindow::mouseMoveEvent(QMouseEvent* e)
 	mouseData.lastY = cy;
 	if (delta > 50)
 		return;
-	xcoord += (cx - lx);
-	ycoord += (cy - ly);
+	coordSys.xcoord += (cx - lx);
+	coordSys.ycoord += (cy - ly);
 
 	QMainWindow::update();
 }

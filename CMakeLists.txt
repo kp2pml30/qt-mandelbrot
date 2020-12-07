@@ -11,24 +11,21 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(CheckCXXCompilerFlag)
+# unset(supports_fast_math CACHE)
+check_cxx_compiler_flag(-ffast-math supports_fast_math)
+if (supports_fast_math)
+	add_compile_options(-ffast-math)
+endif()
+
 find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets REQUIRED)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets REQUIRED)
 
-if(ANDROID)
-  add_library(mandel SHARED
-    main.cpp
-    mainwindow.cpp
-    mainwindow.h
-    mainwindow.ui
-  )
-else()
-  add_executable(mandel
-    main.cpp
-    mainwindow.cpp
-    mainwindow.h
-    mainwindow.ui
-  )
-endif()
+add_executable(mandel
+	main.cpp
+	mainwindow.cpp
+	mainwindow.ui
+)
 
 find_library(PThread pthread REQUIRED)
 target_link_libraries(mandel PRIVATE Qt${QT_VERSION_MAJOR}::Widgets ${PThread})
