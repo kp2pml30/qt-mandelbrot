@@ -112,7 +112,7 @@ MainWindow::Tile* MainWindow::TileHelper::GetFromPool() noexcept
 void MainWindow::resizeEvent(QResizeEvent* ev)
 {
 	QMainWindow::resizeEvent(ev);
-	tilesData.InvalidateTiles();
+	// tilesData.InvalidateTiles();
 }
 void MainWindow::paintEvent(QPaintEvent* ev)
 {
@@ -130,6 +130,7 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 	if (ycamoffset <= 0)
 		ycamoffset += Tile::size;
 	Threading::TileWithPrior prevTile = {100, nullptr};
+	bool needsInvalidation = tilesData.cache.size() > (height / Tile::size + 2) * (width / Tile::size + 2) * 4;
 	for (int y = -Tile::size; y <= height; y += Tile::size)
 	{
 		int ry = y - coordSys.ycoord;
@@ -150,6 +151,8 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 			Complex corner = Complex(rx, ry) * coordSys.scale;
 			corner += coordSys.zeroPixelCoord;
 			auto* tile = tilesData.GetTile(rx, ry, corner, Complex(Tile::size, Tile::size) * coordSys.scale);
+			if (needsInvalidation)
+				usedTiles.used.emplace(tile);
 			auto img = tile->rendered.load();
 			bool isLast = tile->IsLast(img);
 			if (!isLast)
@@ -189,6 +192,8 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 			// painter.drawText(0, 0, txt.c_str());
 		} // x cycle
 	} // y cycle
+	if (needsInvalidation)
+		printf("invalidating cache: %lu removed\n", usedTiles.InvalidateCache(tilesData));
 	usedTiles.Finish();
 	if (needsRerender)
 	{

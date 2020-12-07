@@ -91,16 +91,6 @@ private:
 			ycoord = 0;
 	} coordSys;
 
-	struct UsedTiles
-	{
-		std::unordered_set<Tile*>
-			prev,
-			cur;
-
-		void Add(Tile*) noexcept;
-		void Finish() noexcept;
-	} usedTiles;
-
 	struct TileHelper
 	{
 		std::vector<Tile*> pool;
@@ -118,6 +108,18 @@ private:
 
 		QImage dflt;
 	} tilesData;
+
+	struct UsedTiles
+	{
+		std::unordered_set<Tile*>
+			prev,
+			cur,
+			used;
+
+		void Add(Tile*) noexcept;
+		void Finish() noexcept;
+		std::size_t InvalidateCache(TileHelper&) noexcept;
+	} usedTiles;
 
 	void Schedule();
 };

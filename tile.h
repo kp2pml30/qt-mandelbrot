@@ -155,4 +155,25 @@ void MainWindow::UsedTiles::Finish() noexcept
 			a->Interrupt();
 	std::swap(cur, prev);
 	cur.clear();
+	used.clear();
+}
+
+std::size_t MainWindow::UsedTiles::InvalidateCache(TileHelper& th) noexcept
+{
+	std::size_t inv = 0;
+	auto it = th.cache.begin();
+	while (it != th.cache.end())
+		if (used.count(it->second) == 0)
+		{
+			Tile* t = it->second;
+			t->Interrupt();
+			it = th.cache.erase(it);
+			th.pool.push_back(t);
+			inv++;
+		}
+		else
+		{
+			++it;
+		}
+	return inv;
 }
