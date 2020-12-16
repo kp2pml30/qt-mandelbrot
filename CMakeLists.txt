@@ -27,5 +27,8 @@ add_executable(mandel
 	mainwindow.ui
 )
 
-find_library(PThread pthread REQUIRED)
-target_link_libraries(mandel PRIVATE Qt${QT_VERSION_MAJOR}::Widgets ${PThread})
+target_link_libraries(mandel PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+find_library(PThread pthread)
+if (PThread)
+	target_link_libraries(mandel PRIVATE  ${PThread})
+endif()

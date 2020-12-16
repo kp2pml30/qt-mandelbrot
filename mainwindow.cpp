@@ -7,9 +7,8 @@
 #include <QMouseEvent>
 #include <QTimer>
 
-#ifndef __FAST_MATH__
-#warning fast math is not enabled
-#endif
+#include <iostream>
+#include <qnamespace.h>
 
 using PrecType = MainWindow::PrecType;
 using Complex = MainWindow::Complex;
@@ -63,10 +62,8 @@ void MainWindow::Threading::ThreadData::ThreadFunc()
 	}
 }
 
-MainWindow::TileHelper::TileHelper() : dflt(Tile::size, Tile::size, QImage::Format::Format_RGB888)
-{
-	dflt.fill(0);
-}
+MainWindow::TileHelper::TileHelper()
+{}
 MainWindow::TileHelper::~TileHelper()
 {
 	InvalidateTiles();
@@ -96,8 +93,7 @@ MainWindow::Tile* MainWindow::TileHelper::GetTile(int x, int y, Complex corner, 
 }
 MainWindow::Tile* MainWindow::TileHelper::Allocate() noexcept
 {
-	auto ret = new Tile(&dflt);
-	return ret;
+	return new Tile(nullptr);
 }
 MainWindow::Tile* MainWindow::TileHelper::GetFromPool() noexcept
 {
@@ -114,18 +110,45 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 {
 	QMainWindow::paintEvent(ev);
 	bool needsRerender = false;
-	bool totallyBad = true;
 
 	int width = this->width();
 	int height = this->height();
 
 	QPainter painter(this);
+
+	if (coordSys.xcoord == 0 && coordSys.ycoord == 0)
+	{
+		int wh = std::max(width, height);
+		if (tilesData.inCaseOfBlack == nullptr)
+		{
+			constexpr auto intm = std::numeric_limits<int>::max();
+			auto offset = Complex(Tile::size, Tile::size) * coordSys.scale;
+			tilesData.inCaseOfBlack = tilesData.GetTile(intm, intm, coordSys.zeroPixelCoord - offset, Complex(wh, wh) * coordSys.scale);
+			// for interrupt here :)
+			tilesData.inCaseOfBlack->Update();
+			tilesData.inCaseOfBlack->Update();
+		}
+		auto* img = tilesData.inCaseOfBlack->rendered.load();
+		assert(img != nullptr);
+		auto ratio = (PrecType)wh / img->width();
+		painter.setTransform(
+				QTransform(
+					ratio, 0,
+					0,     ratio,
+
+					0,
+					0
+			));
+		painter.drawImage(0, 0, *img);
+	}
+
 	int xcamoffset = coordSys.xcoord % Tile::size;
 	int ycamoffset = coordSys.ycoord % Tile::size;
 	if (xcamoffset <= 0)
 		xcamoffset += Tile::size;
 	if (ycamoffset <= 0)
 		ycamoffset += Tile::size;
+
 	Threading::TileWithPrior prevTile = {100, nullptr};
 	bool needsInvalidation = tilesData.cache.size() > (height / Tile::size + 2) * (width / Tile::size + 2) * 4;
 	for (int y = -Tile::size; y <= height; y += Tile::size)
@@ -151,8 +174,6 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 			if (needsInvalidation)
 				usedTiles.used.emplace(tile);
 			auto img = tile->rendered.load();
-			if (!tile->IsDflt(img))
-				totallyBad = false;
 			if (!tile->IsLast(img))
 			{
 				needsRerender = true;
@@ -172,51 +193,31 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 					threading.cv.notify_one();
 				}
 			}
-			int ratio = Tile::size / img->width();
-			painter.setTransform(
-					QTransform(
-						ratio, 0,
-						0,     ratio,
+			if (img != nullptr)
+			{
+				int ratio = Tile::size / img->width();
+				painter.setTransform(
+						QTransform(
+							ratio, 0,
+							0,     ratio,
 
-						xcamoffset + x,
-						ycamoffset + y
-				));
-			painter.drawImage(0, 0, *tile->rendered.load());
+							xcamoffset + x,
+							ycamoffset + y
+					));
+				painter.drawImage(0, 0, *img);
+			}
 		} // x cycle
 	} // y cycle
 	if (needsInvalidation)
-		printf("invalidating cache: %lu removed\n", usedTiles.InvalidateCache(tilesData));
+		std::cout << "invalidating cache: " << usedTiles.InvalidateCache(tilesData) << " removed" << std::endl;
 	usedTiles.Finish();
 	// render at least something to show
-	if (totallyBad)
-	{
-		int wh = std::max(width, height);
-		if (tilesData.inCaseOfBlack == nullptr)
-		{
-			constexpr auto intm = std::numeric_limits<int>::max();
-			auto offset = Complex(Tile::size, Tile::size) * coordSys.scale;
-			tilesData.inCaseOfBlack = tilesData.GetTile(intm, intm, coordSys.zeroPixelCoord - offset, Complex(wh, wh) * coordSys.scale);
-			// for interrupt here :)
-			tilesData.inCaseOfBlack->Update();
-			tilesData.inCaseOfBlack->Update();
-		}
-		auto& img = *tilesData.inCaseOfBlack->rendered.load();
-		auto ratio = (PrecType)wh / img.width();
-		painter.setTransform(
-				QTransform(
-					ratio, 0,
-					0,     ratio,
-
-					0,
-					0
-			));
-		painter.drawImage(0, 0, img);
-	}
 	if (needsRerender)
 	{
-		threading.cv.notify_all();
+		// threading.cv.notify_all();
 		Schedule();
 	}
+	ev->accept();
 }
 
 void MainWindow::Schedule()
@@ -232,25 +233,51 @@ void MainWindow::wheelEvent(QWheelEvent* ev)
 		return;
 	coordSys.zeroPixelCoord -= coordSys.scale * Complex(coordSys.xcoord, coordSys.ycoord);
 	coordSys.xcoord = coordSys.ycoord = 0;
-	PrecType dd = d / 500.0;
-	if (d > 0)
-		coordSys.scale *= 1.1;
-	else
-		coordSys.scale /= 1.1;
+	PrecType dd = d / 90.0;
+	coordSys.scale *= std::pow(1.09, dd);
 	tilesData.InvalidateTiles();
 	this->update();
+	ev->accept();
 }
-void MainWindow::mouseMoveEvent(QMouseEvent* e)
+void MainWindow::mouseReleaseEvent(QMouseEvent* ev)
 {
-	QMainWindow::mouseMoveEvent(e);
-	/*
-	if (e->button() != Qt::LeftButton)
+	if (ev->button() == Qt::LeftButton)
+	{
+		mouseData.enabled = false;
+		ev->accept();
+	}
+	else
+	{
+		ev->ignore();
+	}
+}
+void MainWindow::mousePressEvent(QMouseEvent* ev)
+{
+	if (ev->button() == Qt::LeftButton)
+	{
+		mouseData.enabled = true;
+		auto cp = ev->screenPos();
+		mouseData.lastX = cp.x();
+		mouseData.lastY = cp.y();
+		ev->accept();
+	}
+	else
+	{
+		ev->ignore();
+	}
+}
+void MainWindow::mouseMoveEvent(QMouseEvent* ev)
+{
+	QMainWindow::mouseMoveEvent(ev);
+	if (!mouseData.enabled)
+	{
+		ev->ignore();
 		return;
-		*/
+	}
 	auto curt = std::chrono::system_clock::now();
 	auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(curt - mouseData.lastUpd).count();
 	mouseData.lastUpd = curt;
-	auto cp = e->screenPos();
+	auto cp = ev->screenPos();
 	int
 		lx = mouseData.lastX,
 		ly = mouseData.lastY,
@@ -258,11 +285,12 @@ void MainWindow::mouseMoveEvent(QMouseEvent* e)
 		cy = cp.y();
 	mouseData.lastX = cx;
 	mouseData.lastY = cy;
-	if (delta > 50)
-		return;
+	// if (delta > 50)
+	// 	return;
 	coordSys.xcoord += (cx - lx);
 	coordSys.ycoord += (cy - ly);
 
+	ev->accept();
 	QMainWindow::update();
 }
 

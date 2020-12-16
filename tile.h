@@ -46,7 +46,6 @@ private:
 public:
 	Tile(QImage* dflt) : dflt(dflt), rendered(dflt)
 	{
-		assert(dflt != nullptr);
 		mips[0] = QImage(size / 16, size / 16, QImage::Format::Format_RGB888);
 		mips[1] = QImage(size /  8, size /  8, QImage::Format::Format_RGB888);
 		mips[2] = QImage(size /  2, size /  2, QImage::Format::Format_RGB888);
