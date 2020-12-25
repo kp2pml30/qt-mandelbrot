@@ -1,9 +1,9 @@
 // internal header/cpp
 #pragma once
 
-#include "mainwindow.h"
+#include "mandelbrot.h"
 
-struct MainWindow::Tile
+struct MandelbrotHolder::Tile
 {
 public:
 	static constexpr int size = 256;
@@ -29,7 +29,7 @@ private:
 	bool interrupt = false;
 	UpdateStatus retStatus = INTERRUPTED;
 
-	friend MainWindow;
+	friend MandelbrotHolder;
 
 	static std::uint8_t mand(Complex c) noexcept
 	{
@@ -148,11 +148,11 @@ public:
 	}
 };
 
-void MainWindow::UsedTiles::Add(Tile* t) noexcept
+void MandelbrotHolder::UsedTiles::Add(Tile* t) noexcept
 {
 	cur.emplace(t);
 }
-void MainWindow::UsedTiles::Finish() noexcept
+void MandelbrotHolder::UsedTiles::Finish() noexcept
 {
 	for (auto& a : prev)
 		if (cur.count(a) == 0)
@@ -162,7 +162,7 @@ void MainWindow::UsedTiles::Finish() noexcept
 	used.clear();
 }
 
-std::size_t MainWindow::UsedTiles::InvalidateCache(TileHelper& th) noexcept
+std::size_t MandelbrotHolder::UsedTiles::InvalidateCache(TileHelper& th) noexcept
 {
 	std::size_t inv = 0;
 	auto it = th.cache.begin();

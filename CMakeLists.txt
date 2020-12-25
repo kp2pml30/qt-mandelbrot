@@ -25,6 +25,7 @@ add_executable(mandel
 	main.cpp
 	mainwindow.cpp
 	mainwindow.ui
+	mandelbrot.cpp
 )
 
 target_link_libraries(mandel PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
