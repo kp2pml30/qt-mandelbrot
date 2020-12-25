@@ -62,7 +62,7 @@ MandelbrotHolder::TileHelper::~TileHelper()
 }
 void MandelbrotHolder::TileHelper::InvalidateTiles() noexcept
 {
-	inCaseOfBlack = nullptr;
+	thumbnail.tile = nullptr;
 	for (auto& a : cache)
 	{
 		a.second->Interrupt();
@@ -110,34 +110,49 @@ void MandelbrotHolder::Move(int dx, int dy)
 	coordSys.ycoord += dy;
 }
 
+void MandelbrotHolder::RenderSmth(QPainter& painter, int width, int height)
+{
+	int wh = std::max(width, height);
+	Complex diag = Complex(wh, wh) * coordSys.scale;
+	Complex offset = coordSys.zeroPixelCoord - Complex(Tile::size + coordSys.xcoord, Tile::size + coordSys.ycoord) * coordSys.scale;
+	bool needsRerender = false;
+	auto*& tile = tilesData.thumbnail.tile;
+	auto& tx = tilesData.thumbnail.x; // read as tile_x
+	auto& ty = tilesData.thumbnail.y;
+	if (tile == nullptr)
+	{
+		constexpr auto intm = std::numeric_limits<int>::max();
+		tile = tilesData.GetTile(intm, intm, offset, diag);
+		tile->Update();
+		tx = coordSys.xcoord;
+		ty = coordSys.ycoord;
+	}
+	else if (tx != coordSys.xcoord || ty != coordSys.ycoord)
+	{
+		tile->Set(offset, diag);
+		tile->Update();
+		tx = coordSys.xcoord;
+		ty = coordSys.ycoord;
+	}
+	auto* img = tile->rendered.load();
+	assert(img != nullptr);
+	auto ratio = (PrecType)wh / img->width();
+	painter.setTransform(
+			QTransform(
+				ratio, 0,
+				0,     ratio,
+
+				0,
+				0
+		));
+	painter.drawImage(0, 0, *img);
+}
+
 void MandelbrotHolder::Render(QPainter &painter, int width, int height)
 {
 	bool needsRerender = false;
-	if (coordSys.xcoord == 0 && coordSys.ycoord == 0)
-	{
-		int wh = std::max(width, height);
-		if (tilesData.inCaseOfBlack == nullptr)
-		{
-			constexpr auto intm = std::numeric_limits<int>::max();
-			auto offset = Complex(Tile::size, Tile::size) * coordSys.scale;
-			tilesData.inCaseOfBlack = tilesData.GetTile(intm, intm, coordSys.zeroPixelCoord - offset, Complex(wh, wh) * coordSys.scale);
-			// for interrupt here :)
-			tilesData.inCaseOfBlack->Update();
-			tilesData.inCaseOfBlack->Update();
-		}
-		auto* img = tilesData.inCaseOfBlack->rendered.load();
-		assert(img != nullptr);
-		auto ratio = (PrecType)wh / img->width();
-		painter.setTransform(
-				QTransform(
-					ratio, 0,
-					0,     ratio,
 
-					0,
-					0
-			));
-		painter.drawImage(0, 0, *img);
-	}
+	RenderSmth(painter, width, height);
 
 	int xcamoffset = coordSys.xcoord % Tile::size;
 	int ycamoffset = coordSys.ycoord % Tile::size;

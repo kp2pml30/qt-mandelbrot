@@ -70,7 +70,11 @@ private:
 		std::vector<Tile*> pool;
 		using PixCoord = std::pair<int, int>;
 		std::map<PixCoord, Tile*> cache;
-		Tile* inCaseOfBlack = nullptr;
+
+		struct {
+			Tile* tile = nullptr;
+			int x = 0, y = 0;
+		} thumbnail;
 
 		// from main thread only
 		TileHelper();
@@ -98,6 +102,8 @@ private:
 
 	// to call update
 	std::function<void()> scheduler;
+
+	void RenderSmth(QPainter& painter, int width, int height);
 public:
 	MandelbrotHolder(std::function<void()> scheduler);
 	void Render(QPainter& painter, int width, int height);

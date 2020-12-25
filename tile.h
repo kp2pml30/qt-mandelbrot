@@ -87,8 +87,8 @@ public:
 	// to call from main thread
 	void Set(Complex corner, Complex diag) noexcept
 	{
+		Interrupt();
 		auto locker = std::lock_guard(mut);
-		interrupt = true;
 		this->corner = corner;
 		this->diag = diag;
 		currentMip = 0;

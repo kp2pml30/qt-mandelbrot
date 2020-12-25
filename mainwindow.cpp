@@ -35,7 +35,7 @@ void MainWindow::wheelEvent(QWheelEvent* ev)
 	auto d = ev->angleDelta().ry();
 	if (d == 0)
 		return;
-	MandelbrotHolder::PrecType dd = d / 90.0;
+	MandelbrotHolder::PrecType dd = -d / 90.0;
 	mandelbrot.Scale(dd);
 	this->update();
 	ev->accept();

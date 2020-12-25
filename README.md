@@ -9,3 +9,6 @@
 * multithreading
 * fixed size tiles
 * tiles caching
+
+## todo
+* [ ] scale to cursor
