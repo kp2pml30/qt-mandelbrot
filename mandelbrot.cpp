@@ -15,8 +15,6 @@ MandelbrotHolder::MandelbrotHolder(std::function<void()> scheduler)
 		a.second.thr = &threading;
 		a.first = std::thread(&Threading::ThreadData::ThreadFunc, &a.second);
 	}
-
-	this->scheduler();
 }
 
 void MandelbrotHolder::Threading::ThreadData::ThreadFunc()

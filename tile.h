@@ -101,6 +101,7 @@ public:
 	{
 		int yd = 0;
 		std::unique_ptr<Tile, std::function<void(Tile*)>> runningResetter = {this, [](Tile* a) { a->running.store(false); }};
+		Complex mdiag, mcorner;
 		while (true)
 		{
 			int y;
@@ -113,6 +114,8 @@ public:
 					interrupt = false;
 					return retStatus;
 				}
+				mdiag = diag;
+				mcorner = corner;
 				// may fire only during first iteration
 				currentY += yd;
 				if (currentY == mips[currentMip].height())
@@ -135,10 +138,10 @@ public:
 				w = img.width();
 
 			std::uint8_t* data = img.bits() + y * img.bytesPerLine();
-			auto yy = (PrecType)y / h * diag.imag() + corner.imag();
+			auto yy = (PrecType)y / h * mdiag.imag() + mcorner.imag();
 			for (int x = 0; x < w; x++)
 			{
-				auto xx = (PrecType)x / w * diag.real() + corner.real();
+				auto xx = (PrecType)x / w * mdiag.real() + mcorner.real();
 				auto val = mand({xx, yy});
 				data[x * 3 + 0] = val * 4;
 				data[x * 3 + 1] = val / 2;

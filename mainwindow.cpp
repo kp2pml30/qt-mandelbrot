@@ -12,7 +12,7 @@ MainWindow::MainWindow(QWidget* parent)
 	, ui(new Ui::MainWindow)
 	, mandelbrot([this]() { this->Schedule(); })
 {
-	ui->setupUi(this);
+	ui->setupUi(this); // this line gives dataraces even in empty solution >_<
 }
 
 void MainWindow::paintEvent(QPaintEvent* ev)
