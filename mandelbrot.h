@@ -67,13 +67,15 @@ private:
 
 	struct TileHelper
 	{
+	public:
 		std::vector<Tile*> pool;
 		using PixCoord = std::pair<int, int>;
 		std::map<PixCoord, Tile*> cache;
 
 		struct {
-			Tile* tile = nullptr;
+			std::unique_ptr<Tile> tile;
 			int x = 0, y = 0;
+			PrecType scale = -1;
 		} thumbnail;
 
 		// from main thread only

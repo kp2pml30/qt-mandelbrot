@@ -10,6 +10,7 @@ MandelbrotHolder::MandelbrotHolder(std::function<void()> scheduler)
 	: scheduler(std::move(scheduler))
 	, threading(std::thread::hardware_concurrency() > 1 ? std::thread::hardware_concurrency() - 1 : 1)
 {
+	tilesData.thumbnail.tile = std::make_unique<Tile>(nullptr);
 	for (auto& a : threading.threads)
 	{
 		a.second.thr = &threading;
@@ -60,7 +61,6 @@ MandelbrotHolder::TileHelper::~TileHelper()
 }
 void MandelbrotHolder::TileHelper::InvalidateTiles() noexcept
 {
-	thumbnail.tile = nullptr;
 	for (auto& a : cache)
 	{
 		a.second->Interrupt();
@@ -114,26 +114,26 @@ void MandelbrotHolder::RenderSmth(QPainter& painter, int width, int height)
 	Complex diag = Complex(wh, wh) * coordSys.scale;
 	Complex offset = coordSys.zeroPixelCoord - Complex(Tile::size + coordSys.xcoord, Tile::size + coordSys.ycoord) * coordSys.scale;
 	bool needsRerender = false;
-	auto*& tile = tilesData.thumbnail.tile;
+	auto* tile = tilesData.thumbnail.tile.get();
 	auto& tx = tilesData.thumbnail.x; // read as tile_x
 	auto& ty = tilesData.thumbnail.y;
-	if (tile == nullptr)
-	{
-		constexpr auto intm = std::numeric_limits<int>::max();
-		tile = tilesData.GetTile(intm, intm, offset, diag);
-		tile->Update();
-		tx = coordSys.xcoord;
-		ty = coordSys.ycoord;
-	}
-	else if (tx != coordSys.xcoord || ty != coordSys.ycoord)
+	auto& ts = tilesData.thumbnail.scale;
+	if (tx != coordSys.xcoord || ty != coordSys.ycoord || ts != coordSys.scale)
 	{
 		tile->Set(offset, diag);
 		tile->Update();
 		tx = coordSys.xcoord;
 		ty = coordSys.ycoord;
+		ts = coordSys.scale;
 	}
 	auto* img = tile->rendered.load();
-	assert(img != nullptr);
+#if 0
+	while (tile->IsDflt(img))
+	{
+		tile->Update();
+		img = tile->rendered.load();
+	}
+#endif
 	auto ratio = (PrecType)wh / img->width();
 	painter.setTransform(
 			QTransform(

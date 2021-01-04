@@ -102,6 +102,7 @@ public:
 		int yd = 0;
 		std::unique_ptr<Tile, std::function<void(Tile*)>> runningResetter = {this, [](Tile* a) { a->running.store(false); }};
 		Complex mdiag, mcorner;
+		std::size_t mcurrentMip;
 		while (true)
 		{
 			int y;
@@ -128,11 +129,12 @@ public:
 					return UPDATED;
 				}
 				y = currentY;
+				mcurrentMip = currentMip;
 			}
 
 			yd = 1;
 
-			auto& img = mips[currentMip];
+			auto& img = mips[mcurrentMip];
 			int
 				h = img.height(),
 				w = img.width();
