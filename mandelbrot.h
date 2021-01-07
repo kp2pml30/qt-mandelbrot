@@ -27,10 +27,25 @@ private:
 			int prior;
 			Tile* tile;
 
-			int operator<=>(TileWithPrior const& r) const
+#if defined(__cplusplus) && __cplusplus >=202000
+			int operator<=>(TileWithPrior const& r) const noexcept
 			{
 				return prior - r.prior;
 			}
+#else
+# define MAKEOP(o) \
+			bool operator o(TileWithPrior const& r) const noexcept \
+			{ \
+				return prior - r.prior o 0; \
+			}
+			MAKEOP(==)
+			MAKEOP(!=)
+			MAKEOP(<)
+			MAKEOP(>)
+			MAKEOP(<=)
+			MAKEOP(>=)
+# undef MAKEOP
+#endif
 		};
 
 		std::priority_queue<TileWithPrior> tasks;
