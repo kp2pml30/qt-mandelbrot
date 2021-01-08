@@ -96,6 +96,14 @@ MandelbrotHolder::Tile* MandelbrotHolder::TileHelper::GetFromPool() noexcept
 
 void MandelbrotHolder::Scale(PrecType dd)
 {
+	using namespace std::chrono;
+	auto now = system_clock::now();
+	if (duration_cast<milliseconds>(now - tilesData.renderTargets.lastUpd).count() > 100)
+	{
+		std::swap(tilesData.renderTargets.cur, tilesData.renderTargets.pre);
+		tilesData.renderTargets.cs = coordSys;
+		tilesData.renderTargets.lastUpd = now;
+	}
 	coordSys.zeroPixelCoord -= coordSys.scale * Complex(coordSys.xcoord, coordSys.ycoord);
 	coordSys.xcoord = coordSys.ycoord = 0;
 	coordSys.scale *= std::pow(1.09, dd);
@@ -112,7 +120,7 @@ void MandelbrotHolder::RenderSmth(QPainter& painter, int width, int height)
 {
 	int wh = std::max(width, height);
 	Complex diag = Complex(wh, wh) * coordSys.scale;
-	Complex offset = coordSys.zeroPixelCoord - Complex(Tile::size + coordSys.xcoord, Tile::size + coordSys.ycoord) * coordSys.scale;
+	Complex offset = coordSys.zeroPixelCoord - Complex(coordSys.xcoord, coordSys.ycoord) * coordSys.scale;
 	bool needsRerender = false;
 	auto* tile = tilesData.thumbnail.tile.get();
 	auto& tx = tilesData.thumbnail.x; // read as tile_x
@@ -127,13 +135,6 @@ void MandelbrotHolder::RenderSmth(QPainter& painter, int width, int height)
 		ts = coordSys.scale;
 	}
 	auto* img = tile->rendered.load();
-#if 0
-	while (tile->IsDflt(img))
-	{
-		tile->Update();
-		img = tile->rendered.load();
-	}
-#endif
 	auto ratio = (PrecType)wh / img->width();
 	painter.setTransform(
 			QTransform(
@@ -146,11 +147,35 @@ void MandelbrotHolder::RenderSmth(QPainter& painter, int width, int height)
 	painter.drawImage(0, 0, *img);
 }
 
-void MandelbrotHolder::Render(QPainter &painter, int width, int height)
+void MandelbrotHolder::Render(QPainter &resPainter, int width, int height)
 {
+	if (tilesData.renderTargets.cur.width() != width
+			|| tilesData.renderTargets.cur.height() != height)
+		tilesData.renderTargets.cur = QImage(width, height, QImage::Format::Format_RGB888);
+	auto painter = QPainter(&tilesData.renderTargets.cur);
 	bool needsRerender = false;
 
 	RenderSmth(painter, width, height);
+
+	if (coordSys.scale != 0)
+	{
+		auto& pcs = tilesData.renderTargets.cs;
+		auto& ccs = coordSys;
+		Complex origin = pcs.zeroPixelCoord - pcs.scale * Complex(pcs.xcoord, pcs.ycoord);
+		Complex originOffset = origin - ccs.zeroPixelCoord;
+		Complex brr = -originOffset / ccs.scale;
+
+		PrecType ratio = pcs.scale / ccs.scale;
+		painter.setTransform(
+				QTransform(
+					ratio, 0,
+					0,     ratio,
+
+					brr.real(),
+					brr.imag()
+			));
+		painter.drawImage(0, 0, tilesData.renderTargets.pre);
+	}
 
 	int xcamoffset = coordSys.xcoord % Tile::size;
 	int ycamoffset = coordSys.ycoord % Tile::size;
@@ -158,10 +183,12 @@ void MandelbrotHolder::Render(QPainter &painter, int width, int height)
 		xcamoffset += Tile::size;
 	if (ycamoffset <= 0)
 		ycamoffset += Tile::size;
+	xcamoffset -= Tile::size;
+	ycamoffset -= Tile::size;
 
 	Threading::TileWithPrior prevTile = {100, nullptr};
 	bool needsInvalidation = tilesData.cache.size() > (height / Tile::size + 2) * (width / Tile::size + 2) * 4;
-	for (int y = -Tile::size; y <= height; y += Tile::size)
+	for (int y = -Tile::size; y <= height + Tile::size; y += Tile::size)
 	{
 		int ry = y - coordSys.ycoord;
 		if (ry >= 0)
@@ -169,7 +196,7 @@ void MandelbrotHolder::Render(QPainter &painter, int width, int height)
 		else
 			ry = (ry - Tile::size + 1) / Tile::size;
 		ry *= Tile::size;
-		for (int x = -Tile::size; x <= width; x += Tile::size)
+		for (int x = -Tile::size; x <= width + Tile::size; x += Tile::size)
 		{
 			int rx = x - coordSys.xcoord;
 			if (rx >= 0)
@@ -226,6 +253,8 @@ void MandelbrotHolder::Render(QPainter &painter, int width, int height)
 		// threading.cv.notify_all();
 		scheduler();
 	}
+
+	resPainter.drawImage(0, 0, tilesData.renderTargets.cur);
 }
 
 MandelbrotHolder::~MandelbrotHolder()

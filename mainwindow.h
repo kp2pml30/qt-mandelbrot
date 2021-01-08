@@ -31,6 +31,7 @@ public:
 
 private:
 	std::unique_ptr<Ui::MainWindow> ui;
+	int scaleAccum = 0;
 
 	MandelbrotHolder mandelbrot;
 

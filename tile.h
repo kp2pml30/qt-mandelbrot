@@ -33,6 +33,9 @@ private:
 
 	static std::uint8_t mand(Complex c) noexcept
 	{
+		if (c.real() >= -0.5 && c.real() <= 0.25
+				&& c.imag() >= -0.5 && c.imag() <= 0.5)
+			return 0;
 		Complex z = {0, 0};
 
 		constexpr int MSTEPS = 255;

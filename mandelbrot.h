@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <complex>
 #include <condition_variable>
 #include <queue>
@@ -71,13 +72,15 @@ private:
 	friend Threading;
 
 public:
-	struct {
+	struct CoordSys
+	{
 		Complex zeroPixelCoord = {-2, -2};
 		PrecType scale = 1 / 256.0;
 		int
 			xcoord = 0,
 			ycoord = 0;
-	} coordSys;
+	};
+	CoordSys coordSys;
 private:
 
 	struct TileHelper
@@ -92,6 +95,13 @@ private:
 			int x = 0, y = 0;
 			PrecType scale = -1;
 		} thumbnail;
+
+		struct {
+			QImage pre;
+			QImage cur;
+			CoordSys cs;
+			std::chrono::system_clock::time_point lastUpd = std::chrono::system_clock::now();
+		} renderTargets;
 
 		// from main thread only
 		TileHelper();
