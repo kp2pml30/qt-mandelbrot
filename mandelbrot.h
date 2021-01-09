@@ -133,8 +133,9 @@ private:
 	void RenderSmth(QPainter& painter, int width, int height);
 public:
 	MandelbrotHolder(std::function<void()> scheduler);
-	void Render(QPainter& painter, int width, int height);
-	void Scale(PrecType by);
+	void Render(int width, int height);
+	void Paint(QPainter& painter);
+	void Scale(PrecType by, int width, int height);
 	void Move(int dx, int dy);
 
 	~MandelbrotHolder();

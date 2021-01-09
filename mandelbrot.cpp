@@ -94,7 +94,7 @@ MandelbrotHolder::Tile* MandelbrotHolder::TileHelper::GetFromPool() noexcept
 	return Allocate();
 }
 
-void MandelbrotHolder::Scale(PrecType dd)
+void MandelbrotHolder::Scale(PrecType dd, int width, int height)
 {
 	using namespace std::chrono;
 	auto now = system_clock::now();
@@ -104,9 +104,17 @@ void MandelbrotHolder::Scale(PrecType dd)
 		tilesData.renderTargets.cs = coordSys;
 		tilesData.renderTargets.lastUpd = now;
 	}
+
+	auto oldcs = coordSys;
 	coordSys.zeroPixelCoord -= coordSys.scale * Complex(coordSys.xcoord, coordSys.ycoord);
 	coordSys.xcoord = coordSys.ycoord = 0;
 	coordSys.scale *= std::pow(1.09, dd);
+
+	auto wh = Complex(width, height);
+	auto middle_offset = (coordSys.scale * wh - oldcs.scale * wh) * (1 / 2.0);
+	coordSys.xcoord = middle_offset.real() / coordSys.scale;
+	coordSys.ycoord = middle_offset.imag() / coordSys.scale;
+
 	tilesData.InvalidateTiles();
 }
 
@@ -147,7 +155,12 @@ void MandelbrotHolder::RenderSmth(QPainter& painter, int width, int height)
 	painter.drawImage(0, 0, *img);
 }
 
-void MandelbrotHolder::Render(QPainter &resPainter, int width, int height)
+void MandelbrotHolder::Paint(QPainter& painter)
+{
+	painter.drawImage(0, 0, tilesData.renderTargets.cur);
+}
+
+void MandelbrotHolder::Render(int width, int height)
 {
 	if (tilesData.renderTargets.cur.width() != width
 			|| tilesData.renderTargets.cur.height() != height)
@@ -157,24 +170,26 @@ void MandelbrotHolder::Render(QPainter &resPainter, int width, int height)
 
 	RenderSmth(painter, width, height);
 
-	if (coordSys.scale != 0)
 	{
-		auto& pcs = tilesData.renderTargets.cs;
-		auto& ccs = coordSys;
-		Complex origin = pcs.zeroPixelCoord - pcs.scale * Complex(pcs.xcoord, pcs.ycoord);
-		Complex originOffset = origin - ccs.zeroPixelCoord;
-		Complex brr = -originOffset / ccs.scale;
-
+		auto const& pcs = tilesData.renderTargets.cs;
+		auto const& ccs = coordSys;
 		PrecType ratio = pcs.scale / ccs.scale;
-		painter.setTransform(
-				QTransform(
-					ratio, 0,
-					0,     ratio,
+		if (ratio >= 0.25 && ratio < 4)
+		{
+			Complex origin = pcs.zeroPixelCoord - pcs.scale * Complex(pcs.xcoord, pcs.ycoord);
+			Complex originOffset = origin - (ccs.zeroPixelCoord - Complex(ccs.xcoord, ccs.ycoord) * ccs.scale);
+			Complex brr = originOffset / ccs.scale;
 
-					brr.real(),
-					brr.imag()
-			));
-		painter.drawImage(0, 0, tilesData.renderTargets.pre);
+			painter.setTransform(
+					QTransform(
+						ratio, 0,
+						0,     ratio,
+
+						brr.real(),
+						brr.imag()
+				));
+			painter.drawImage(0, 0, tilesData.renderTargets.pre);
+		}
 	}
 
 	int xcamoffset = coordSys.xcoord % Tile::size;
@@ -253,8 +268,6 @@ void MandelbrotHolder::Render(QPainter &resPainter, int width, int height)
 		// threading.cv.notify_all();
 		scheduler();
 	}
-
-	resPainter.drawImage(0, 0, tilesData.renderTargets.cur);
 }
 
 MandelbrotHolder::~MandelbrotHolder()

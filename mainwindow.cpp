@@ -20,7 +20,8 @@ void MainWindow::paintEvent(QPaintEvent* ev)
 	QMainWindow::paintEvent(ev);
 
 	QPainter painter(this);
-	mandelbrot.Render(painter, width(), height());
+	mandelbrot.Render(width(), height());
+	mandelbrot.Paint(painter);
 	ev->accept();
 }
 
@@ -36,7 +37,8 @@ void MainWindow::wheelEvent(QWheelEvent* ev)
 	if (d == 0)
 		return;
 	MandelbrotHolder::PrecType dd = -d / 90.0;
-	mandelbrot.Scale(dd);
+	mandelbrot.Render(width(), height());
+	mandelbrot.Scale(dd, width(), height());
 	this->update();
 	ev->accept();
 }
